@@ -32,4 +32,14 @@ def get_tasks(task_id: int):
         content={'error':f'Task {task_id} not found'}
     )
     
-
+@app.post("/tasks", status_code = 201)
+def add_task(record: dict):
+    if 'title' not in record or not isinstance(record['title'],str):
+        return JSONResponse(
+            status_code=400,
+            content={'error':'title should be a string'}
+        )
+    task_id = mem[-1]['id'] + 1
+    task = {"id":task_id, "title":record['title'], "Done":False}
+    mem.append(task)
+    return {"message": "created", "task": task}
