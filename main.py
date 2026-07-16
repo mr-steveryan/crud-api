@@ -1,4 +1,12 @@
 from fastapi import FastAPI
+from fastapi.responses import JSONResponse
+
+mem = [
+    {'id':101, 'title':'R&D Phase 1','done':True},
+    {'id':102, 'title':'Phase 1 Feature Implementation','done':False},
+    {'id':103, 'title':'Intern Meet','done':False},
+    {'id':104, 'title':'Client Pitch','done':True}
+]
 
 app=FastAPI()
 
@@ -9,4 +17,19 @@ def root():
 @app.get('/health')
 def health():
     return {'status':'working'}
+
+@app.get('/tasks')
+def list_tasks():
+    return mem
+    
+@app.get('/tasks/{task_id}')
+def get_tasks(task_id: int):
+    for item in mem:
+        if item['id'] == task_id:
+            return item
+    return JSONResponse(
+        status_code=404,
+        content={'error':f'Task {task_id} not found'}
+    )
+    
 
