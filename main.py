@@ -40,7 +40,7 @@ def add_task(record: dict):
             content={'error':'title should exist and should be a string'}
         )
     task_id = mem[-1]['id'] + 1
-    task = {"id":task_id, "title":record['title'], "Done":False}
+    task = {"id":task_id, "title":record['title'], "done":False}
     mem.append(task)
     return {"message": "created", "task": task}
 
