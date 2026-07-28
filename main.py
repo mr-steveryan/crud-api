@@ -1,5 +1,4 @@
-from fastapi import FastAPI
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, HTTPException, status
 
 mem = [
     {'id':101, 'title':'R&D Phase 1','done':True},
@@ -27,18 +26,12 @@ def get_tasks(task_id: int):
     for item in mem:
         if item['id'] == task_id:
             return item
-    return JSONResponse(
-        status_code=404,
-        content={'error':f'Task {task_id} not found'}
-    )
+    raise HTTPException(status.HTTP_404_NOT_FOUND, f'Task {task_id} not found')
     
-@app.post("/tasks", status_code = 201)
+@app.post("/tasks", status_code = status.HTTP_201_CREATED)
 def add_task(record: dict):
     if 'title' not in record or not isinstance(record['title'],str):
-        return JSONResponse(
-            status_code=400,
-            content={'error':'title should exist and should be a string'}
-        )
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, 'title must exist and be a string')
     task_id = mem[-1]['id'] + 1
     task = {"id":task_id, "title":record['title'], "done":False}
     mem.append(task)
@@ -47,33 +40,21 @@ def add_task(record: dict):
 @app.put('/tasks/{task_id}')
 def update_task(task_id: int, record: dict):
     if 'title' not in record or not isinstance(record['title'],str):
-        return JSONResponse(
-            status_code=400,
-            content={'error':'title should exist and should be a string'}
-        )
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, 'title must exist and be a string')
     if 'done' not in record or not isinstance(record['done'],bool):
-        return JSONResponse(
-            status_code=400,
-            content={'error':'done should exist and should be a boolean'}
-        )
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, 'done status must exist and be a boolean')
     for item in mem:
         if item['id'] == task_id:
             item['title']=record['title']
             item['done']=record['done']
             return item
-    return JSONResponse(
-        status_code=404,
-        content={'error':f"record with id: {task_id} doesn't exist"}
-    )
+    raise HTTPException(status.HTTP_404_NOT_FOUND, f'Task {task_id} not found')
     
-@app.delete('/tasks/{task_id}', status_code=204)
+@app.delete('/tasks/{task_id}', status_code=status.HTTP_204_NO_CONTENT)
 def delete_task(task_id: int):
     for item in mem:
         if item['id'] == task_id:
             mem.remove(item)
             return
-    return JSONResponse(
-        status_code=404,
-        content={'error':f"record with id: {task_id} doesn't exist"}
-    )
+    raise HTTPException(status.HTTP_404_NOT_FOUND, f'Task {task_id} not found')
     
