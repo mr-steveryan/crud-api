@@ -1,13 +1,34 @@
+import sqlite3
 from fastapi import FastAPI, HTTPException, status
 
 mem = [
     {'id':101, 'title':'R&D Phase 1','done':True},
     {'id':102, 'title':'Phase 1 Feature Implementation','done':False},
     {'id':103, 'title':'Intern Meet','done':False},
-    {'id':104, 'title':'Client Pitch','done':True}
 ]
 
+def connection():
+    conn=sqlite3.connect("tasks.db")
+    conn.row_factory = sqlite3.Row
+    return conn
+
+def init_db() -> None:
+    with connection() as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS tasks (
+                id          INTEGER PRIMARY KEY,
+                title       TEXT NOT NULL,
+                done        BOOLEAN NOT NULL DEFAULT 0 CHECK (done IN (0, 1))
+            );
+        """)
+        
+        has_rows=conn.execute("SELECT 1 FROM tasks LIMIT 1").fetchone()
+        if not has_rows:
+            conn.executemany("INSERT INTO tasks (id, title, done) VALUES (:id, :title, :done)",mem)
+            
+        
 app=FastAPI()
+init_db()
 
 @app.get('/')
 def root():
