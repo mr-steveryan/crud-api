@@ -1,5 +1,5 @@
+from fastapi import status, FastAPI, HTTPException
 import sqlite3
-from fastapi import FastAPI, HTTPException, status
 
 mem = [
     {'id':101, 'title':'R&D Phase 1','done':True},
@@ -19,7 +19,7 @@ def init_db() -> None:
                 id          INTEGER PRIMARY KEY,
                 title       TEXT NOT NULL,
                 done        BOOLEAN NOT NULL DEFAULT 0 CHECK (done IN (0, 1))
-            );
+            )
         """)
         
         has_rows=conn.execute("SELECT 1 FROM tasks LIMIT 1").fetchone()
@@ -40,14 +40,18 @@ def health():
 
 @app.get('/tasks')
 def list_tasks():
-    return mem
+    with connection() as conn:
+        records = conn.execute("SELECT * FROM tasks").fetchall()
+        return [dict(rows) for rows in records]
+        
     
 @app.get('/tasks/{task_id}')
 def get_tasks(task_id: int):
-    for item in mem:
-        if item['id'] == task_id:
-            return item
-    raise HTTPException(status.HTTP_404_NOT_FOUND, f'Task {task_id} not found')
+    with connection() as conn:
+        row = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f'Task {task_id} not found')
+    return dict(row)
     
 @app.post("/tasks", status_code = status.HTTP_201_CREATED)
 def add_task(record: dict):
