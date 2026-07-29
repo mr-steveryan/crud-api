@@ -2,7 +2,7 @@ from contextlib import contextmanager
 from fastapi import status, FastAPI, HTTPException
 import sqlite3
 
-mem = [
+seed = [
     {'id':101, 'title':'R&D Phase 1','done':True},
     {'id':102, 'title':'Phase 1 Feature Implementation','done':False},
     {'id':103, 'title':'Intern Meet','done':False},
@@ -30,7 +30,7 @@ def init_db() -> None:
         
         has_rows=conn.execute("SELECT 1 FROM tasks LIMIT 1").fetchone()
         if not has_rows:
-            conn.executemany("INSERT INTO tasks (id, title, done) VALUES (:id, :title, :done)",mem)
+            conn.executemany("INSERT INTO tasks (id, title, done) VALUES (:id, :title, :done)",seed)
             
         
 app=FastAPI()
@@ -72,20 +72,19 @@ def add_task(record: dict):
 def update_task(task_id: int, record: dict):
     if 'title' not in record or not isinstance(record['title'],str):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, 'title must exist and be a string')
-    if 'done' not in record or not isinstance(record['done'],bool):
+    elif 'done' not in record or not isinstance(record['done'],bool):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, 'done status must exist and be a boolean')
-    for item in mem:
-        if item['id'] == task_id:
-            item['title']=record['title']
-            item['done']=record['done']
-            return item
-    raise HTTPException(status.HTTP_404_NOT_FOUND, f'Task {task_id} not found')
-    
+    else:
+        with connection() as conn:
+            row = conn.execute("UPDATE tasks SET title = ?, done = ? WHERE id = ? RETURNING *",(record['title'],record['done'],task_id)).fetchone()
+        if row is None:
+            raise HTTPException(status.HTTP_404_NOT_FOUND, f'Task {task_id} not found')
+        return dict(row)
+            
 @app.delete('/tasks/{task_id}', status_code=status.HTTP_204_NO_CONTENT)
 def delete_task(task_id: int):
-    for item in mem:
-        if item['id'] == task_id:
-            mem.remove(item)
-            return
-    raise HTTPException(status.HTTP_404_NOT_FOUND, f'Task {task_id} not found')
-    
+    with connection() as conn:
+        row = conn.execute("DELETE FROM tasks WHERE id = ? RETURNING *",(task_id,)).fetchone()
+    if row is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f'Task {task_id} not found')
+    return
