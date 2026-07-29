@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 from fastapi import status, FastAPI, HTTPException
 import sqlite3
 
@@ -7,10 +8,15 @@ mem = [
     {'id':103, 'title':'Intern Meet','done':False},
 ]
 
+@contextmanager
 def connection():
-    conn=sqlite3.connect("tasks.db")
+    conn = sqlite3.connect("tasks.db")
     conn.row_factory = sqlite3.Row
-    return conn
+    try:
+        yield conn
+        conn.commit()
+    finally:
+        conn.close()
 
 def init_db() -> None:
     with connection() as conn:
@@ -42,9 +48,8 @@ def health():
 def list_tasks():
     with connection() as conn:
         records = conn.execute("SELECT * FROM tasks").fetchall()
-        return [dict(rows) for rows in records]
+    return [dict(row) for row in records]
         
-    
 @app.get('/tasks/{task_id}')
 def get_tasks(task_id: int):
     with connection() as conn:
@@ -55,12 +60,13 @@ def get_tasks(task_id: int):
     
 @app.post("/tasks", status_code = status.HTTP_201_CREATED)
 def add_task(record: dict):
-    if 'title' not in record or not isinstance(record['title'],str):
-        raise HTTPException(status.HTTP_400_BAD_REQUEST, 'title must exist and be a string')
-    task_id = mem[-1]['id'] + 1
-    task = {"id":task_id, "title":record['title'], "done":False}
-    mem.append(task)
-    return {"message": "created", "task": task}
+    title = record['title']
+    done = False
+    if 'title' not in record or title == '':
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, 'title must exist and be a non-empty string')
+    with connection() as conn:
+        task = conn.execute("INSERT INTO tasks (title, done) VALUES (?,?) RETURNING *",(title,done)).fetchone()
+    return dict(task)
 
 @app.put('/tasks/{task_id}')
 def update_task(task_id: int, record: dict):
