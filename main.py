@@ -1,6 +1,8 @@
-from contextlib import contextmanager
 from fastapi import status, FastAPI, HTTPException
-import sqlite3
+import os
+import psycopg
+from psycopg.rows import dict_row, DictRow
+from dotenv import load_dotenv
 
 seed = [
     {'id':101, 'title':'R&D Phase 1','done':True},
@@ -8,30 +10,26 @@ seed = [
     {'id':103, 'title':'Intern Meet','done':False},
 ]
 
-@contextmanager
-def connection():
-    conn = sqlite3.connect("tasks.db")
-    conn.row_factory = sqlite3.Row
-    try:
-        yield conn
-        conn.commit()
-    finally:
-        conn.close()
+load_dotenv()
+DATABASE_URL = os.environ["DATABASE_URL"]
 
-def init_db() -> None:
+def connection():
+    return psycopg.Connection[DictRow].connect(DATABASE_URL, row_factory=dict_row)
+
+def init_db():
     with connection() as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS tasks (
-                id          INTEGER PRIMARY KEY,
-                title       TEXT NOT NULL,
-                done        BOOLEAN NOT NULL DEFAULT 0 CHECK (done IN (0, 1))
-            )
-        """)
-        
-        has_rows=conn.execute("SELECT 1 FROM tasks LIMIT 1").fetchone()
-        if not has_rows:
-            conn.executemany("INSERT INTO tasks (id, title, done) VALUES (:id, :title, :done)",seed)
-            
+        with conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS tasks (
+                    id SERIAL PRIMARY KEY,
+                    title TEXT NOT NULL,
+                    done BOOLEAN DEFAULT FALSE
+                )
+            """)
+            has_rows = cur.execute("SELECT 1 FROM tasks LIMIT 1").fetchone()
+            if not has_rows:
+                cur.executemany(
+                    "INSERT INTO tasks (title, done) VALUES (%(title)s, %(done)s)",seed)
         
 app=FastAPI()
 init_db()
