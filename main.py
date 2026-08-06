@@ -48,7 +48,7 @@ def list_tasks():
     with connection() as conn:
         records = conn.execute("SELECT * FROM tasks").fetchall()
     return [dict(row) for row in records]
-        
+ 
 @app.get('/tasks/{task_id}')
 def get_tasks(task_id: int):
     with connection() as conn:
@@ -59,31 +59,33 @@ def get_tasks(task_id: int):
     
 @app.post("/tasks", status_code = status.HTTP_201_CREATED)
 def add_task(record: dict):
-    title = record['title']
+    title = record.get("title")
     done = False
-    if 'title' not in record or title == '':
+    if not isinstance(title,str) or not title.strip():
         raise HTTPException(status.HTTP_400_BAD_REQUEST, 'title must exist and be a non-empty string')
     with connection() as conn:
-        task = conn.execute("INSERT INTO tasks (title, done) VALUES (?,?) RETURNING *",(title,done)).fetchone()
-    return dict(task)
+        task = conn.execute("INSERT INTO tasks (title, done) VALUES (%s,%s) RETURNING *",(title,done)).fetchone()
+    return task
 
 @app.put('/tasks/{task_id}')
 def update_task(task_id: int, record: dict):
-    if 'title' not in record or not isinstance(record['title'],str):
+    title = record.get("title")
+    done = record.get("done")
+    if not isinstance(title,str) or not title.strip():
         raise HTTPException(status.HTTP_400_BAD_REQUEST, 'title must exist and be a string')
-    elif 'done' not in record or not isinstance(record['done'],bool):
+    elif not isinstance(done,bool):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, 'done status must exist and be a boolean')
     else:
         with connection() as conn:
-            row = conn.execute("UPDATE tasks SET title = ?, done = ? WHERE id = ? RETURNING *",(record['title'],record['done'],task_id)).fetchone()
+            row = conn.execute("UPDATE tasks SET title = %s, done = %s WHERE id = %s RETURNING *",(title, done, task_id)).fetchone()
         if row is None:
             raise HTTPException(status.HTTP_404_NOT_FOUND, f'Task {task_id} not found')
-        return dict(row)
+        return row
             
 @app.delete('/tasks/{task_id}', status_code=status.HTTP_204_NO_CONTENT)
 def delete_task(task_id: int):
     with connection() as conn:
-        row = conn.execute("DELETE FROM tasks WHERE id = ? RETURNING *",(task_id,)).fetchone()
+        row = conn.execute("DELETE FROM tasks WHERE id = %s RETURNING *",(task_id,)).fetchone()
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f'Task {task_id} not found')
     return
