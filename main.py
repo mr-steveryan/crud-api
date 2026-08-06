@@ -30,9 +30,10 @@ def init_db():
             if not has_rows:
                 cur.executemany(
                     "INSERT INTO tasks (title, done) VALUES (%(title)s, %(done)s)",seed)
-        
+
+init_db()        
 app=FastAPI()
-init_db()
+
 
 @app.get('/')
 def root():
@@ -51,7 +52,7 @@ def list_tasks():
 @app.get('/tasks/{task_id}')
 def get_tasks(task_id: int):
     with connection() as conn:
-        row = conn.execute("SELECT * FROM tasks WHERE id = ?", (task_id,)).fetchone()
+        row = conn.execute("SELECT * FROM tasks WHERE id = %s", (task_id,)).fetchone()
     if row is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f'Task {task_id} not found')
     return dict(row)
