@@ -1,37 +1,57 @@
 # task API
 
-A minimal CRUD API built with FastAPI. Tasks are stored in a SQLite database, so data survives a restart.
+A minimal CRUD API built with FastAPI. Tasks are stored in Postgres. The API and the database both run in Docker, started with a single `docker compose up`.
 
-## Why SQLite
+## Why Postgres + Docker
 
-- **Zero setup** — `sqlite3` ships with Python's standard library. No server to install, no connection string, no Docker.
-- **Single file** — the whole database is one file you can copy, delete, or open in a viewer.
-- **Right size for this API** — one table, one process, low traffic. Postgres would add operational cost with nothing to show for it.
-- **Constraints in the schema** — `NOT NULL`, `CHECK (done IN (0, 1))` and `INTEGER PRIMARY KEY` (auto-assigns ids) enforce validity in the database instead of in Python.
+- **Real database engine** — proper types (`BOOLEAN`, `SERIAL`), concurrent writers, and a network protocol instead of a single file on disk.
+- **One command to run everything** — `docker compose up` builds the API image and starts Postgres, wires them together on a private network, and waits for the database to be healthy before starting the API.
+- **No local Postgres install** — the database only exists inside the `db` container and its volume; nothing to set up on the host.
+- **Data survives restarts** — Postgres writes to the named volume `pgdata`, so `docker compose down` (without `-v`) keeps the data for next time.
 
-## Where the database lives
+## Configuration
 
-`tasks.db` in the directory the server is started from — the project root if you follow the commands below.
+Both services read from `.env` (see `.env.example`):
 
-The path is relative (`sqlite3.connect("tasks.db")` in `main.py`), so starting the server from a different directory creates a fresh, empty database there.
+```
+POSTGRES_USER=...
+POSTGRES_PASSWORD=...
+POSTGRES_DB=...
+```
 
-`init_db()` runs at import time: it creates the `tasks` table if missing and seeds three rows only when the table is empty.
+`docker-compose.yaml` builds `DATABASE_URL` for the API container from those values, pointed at the `db` service:
+
+```
+postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+```
+
+`main.py` reads `DATABASE_URL` directly via `python-dotenv` / `os.environ`. `init_db()` runs at import time: creates the `tasks` table if missing, seeds three rows only when the table is empty.
 
 ## Install & run
 
-Requires Python 3.14+ and [uv](https://docs.astral.sh/uv/).
+Requires Docker and Docker Compose.
+
+```bash
+cp .env.example .env   # fill in POSTGRES_USER / POSTGRES_PASSWORD / POSTGRES_DB
+docker compose up -d --build
+```
+
+Server runs at `http://localhost:8000`. Postgres runs at `localhost:5432` (also reachable from your host, e.g. with `psql` or a GUI client).
+
+To reset the data, drop the volume and start fresh:
+
+```bash
+docker compose down -v
+docker compose up -d --build
+```
+
+### Running without Docker
+
+Requires Python 3.14+, [uv](https://docs.astral.sh/uv/), and a Postgres instance reachable at the `DATABASE_URL` in `.env`.
 
 ```bash
 uv sync
 uv run uvicorn main:app --port 8000 --reload
-```
-
-Server runs at `http://localhost:8000`. `tasks.db` is created on first start.
-
-To reset the data, delete the file and restart:
-
-```bash
-rm tasks.db
 ```
 
 ## Endpoints
@@ -46,7 +66,7 @@ rm tasks.db
 | PUT | `/tasks/{id}` | Update task (`title`, `done` required) | 200 / 400 / 404 |
 | DELETE | `/tasks/{id}` | Delete task | 204 / 404 |
 
-`done` comes back as `0` or `1` — SQLite has no boolean type, it stores them as integers.
+`done` comes back as a real JSON boolean (`true`/`false`) — Postgres has a native `BOOLEAN` type.
 
 ## API docs
 
@@ -56,7 +76,7 @@ Swagger UI at `http://localhost:8000/docs` (or Interactive docs at `http://local
 
 ## Database viewer
 
-![DB](docs/db.png)
+![DB](docs/postgres_db.png)
 
 ## SQL used
 
@@ -64,17 +84,19 @@ The schema, created by `init_db()`:
 
 ```sql
 CREATE TABLE IF NOT EXISTS tasks (
-    id          INTEGER PRIMARY KEY,
-    title       TEXT NOT NULL,
-    done        BOOLEAN NOT NULL DEFAULT 0 CHECK (done IN (0, 1))
+    id      SERIAL PRIMARY KEY,
+    title   TEXT NOT NULL,
+    done    BOOLEAN DEFAULT FALSE
 );
 ```
+
+`id` is assigned by a Postgres sequence (`SERIAL`), not by the seed data — the seed rows below get whatever ids the sequence is on, not necessarily `1, 2, 3`.
 
 Seed rows, inserted only when the table is empty:
 
 ```sql
 SELECT 1 FROM tasks LIMIT 1;
-INSERT INTO tasks (id, title, done) VALUES (:id, :title, :done);
+INSERT INTO tasks (title, done) VALUES (%(title)s, %(done)s);
 ```
 
 The queries behind each endpoint:
@@ -84,27 +106,27 @@ The queries behind each endpoint:
 SELECT * FROM tasks;
 
 -- GET /tasks/{id}
-SELECT * FROM tasks WHERE id = ?;
+SELECT * FROM tasks WHERE id = %s;
 
--- POST /tasks   (id assigned by SQLite)
-INSERT INTO tasks (title, done) VALUES (?, ?) RETURNING *;
+-- POST /tasks   (id assigned by Postgres)
+INSERT INTO tasks (title, done) VALUES (%s, %s) RETURNING *;
 
 -- PUT /tasks/{id}
-UPDATE tasks SET title = ?, done = ? WHERE id = ? RETURNING *;
+UPDATE tasks SET title = %s, done = %s WHERE id = %s RETURNING *;
 
 -- DELETE /tasks/{id}
-DELETE FROM tasks WHERE id = ? RETURNING *;
+DELETE FROM tasks WHERE id = %s RETURNING *;
 ```
 
 `RETURNING *` gives back the affected row in one round trip, so the API can respond with the new state — and a `None` result means the id didn't exist, which is how 404s are detected.
 
-Values are always passed as bound parameters (`?` / `:name`), never string-formatted into the SQL.
+Values are always passed as bound parameters (`%s` / `%(name)s`), never string-formatted into the SQL.
 
 Inspect the database directly:
 
 ```bash
-sqlite3 tasks.db ".schema"
-sqlite3 tasks.db "SELECT * FROM tasks;"
+docker exec -it flyrank-pg psql -U <POSTGRES_USER> -d <POSTGRES_DB> -c '\d tasks'
+docker exec -it flyrank-pg psql -U <POSTGRES_USER> -d <POSTGRES_DB> -c 'SELECT * FROM tasks;'
 ```
 
 ## Testing with curl
@@ -143,9 +165,9 @@ Returns every row in the `tasks` table.
 curl -s http://localhost:8000/tasks
 ```
 
-**Response**
+**Response** — ids come from the Postgres sequence, so exact numbers will vary run to run
 ```json
-[{"id":101,"title":"R&D Phase 1","done":1},{"id":102,"title":"Phase 1 Feature Implementation","done":0},{"id":103,"title":"Intern Meet","done":0}]
+[{"id":1,"title":"R&D Phase 1","done":true},{"id":2,"title":"Phase 1 Feature Implementation","done":false},{"id":3,"title":"Intern Meet","done":false}]
 ```
 
 ### `GET /tasks/{id}` — Get one task
@@ -153,12 +175,12 @@ curl -s http://localhost:8000/tasks
 Returns a single task by id, or a 404 if it doesn't exist.
 
 ```bash
-curl -s http://localhost:8000/tasks/101
+curl -s http://localhost:8000/tasks/1
 ```
 
 **Response**
 ```json
-{"id":101,"title":"R&D Phase 1","done":1}
+{"id":1,"title":"R&D Phase 1","done":true}
 ```
 
 ```bash
@@ -172,7 +194,7 @@ curl -s http://localhost:8000/tasks/999
 
 ### `POST /tasks` — Create a task
 
-Inserts a task from a `title`; SQLite assigns the id. Rejects an empty title.
+Inserts a task from a `title`; Postgres assigns the id. Rejects an empty title.
 
 ```bash
 curl -s -X POST http://localhost:8000/tasks \
@@ -182,7 +204,7 @@ curl -s -X POST http://localhost:8000/tasks \
 
 **Response** — `201`
 ```json
-{"id":104,"title":"Write README","done":0}
+{"id":4,"title":"Write README","done":false}
 ```
 
 ```bash
@@ -201,14 +223,14 @@ curl -s -X POST http://localhost:8000/tasks \
 Replaces `title` and `done` on an existing row; 404 if the id doesn't exist.
 
 ```bash
-curl -s -X PUT http://localhost:8000/tasks/102 \
+curl -s -X PUT http://localhost:8000/tasks/2 \
   -H 'Content-Type: application/json' \
   -d '{"title": "Phase 1 Feature Implementation", "done": true}'
 ```
 
 **Response**
 ```json
-{"id":102,"title":"Phase 1 Feature Implementation","done":1}
+{"id":2,"title":"Phase 1 Feature Implementation","done":true}
 ```
 
 ### `DELETE /tasks/{id}` — Delete a task
@@ -216,7 +238,7 @@ curl -s -X PUT http://localhost:8000/tasks/102 \
 Removes a row by id; 404 if it doesn't exist.
 
 ```bash
-curl -s -i -X DELETE http://localhost:8000/tasks/103
+curl -s -i -X DELETE http://localhost:8000/tasks/3
 ```
 
 **Response**
